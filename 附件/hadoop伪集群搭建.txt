@@ -1,0 +1,103 @@
+基本环境要求：JDK(最高支持1.7)，文件夹读写权限，修改 /etc/hosts和/etc/sysconfig/network中的主机名
+
+1.修改hadoop-env.sh中的JAVA_HOME变量
+2.修改core-site.xml，在configuration中配置属性。
+    <!— fs.defaultFS -这是一个描述集群中NameNode结点的URI(包括协议、主机名称、端口号)，集群里面的每一台机器都需要知道NameNode的地址。DataNode结点会先在NameNode上注册，这样它们的数据才可以被使用。独立的客户端程序通过这个URI跟DataNode交互，以取得文件的块列表。-->
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://hadoop:9000</value>
+    </property>
+    
+    <!—hadoop.tmp.dir 是hadoop文件系统依赖的基础配置，很多路径都依赖它。如果hdfs-site.xml中不配置namenode和datanode的存放位置，默认就放在这个路径中-->
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/usr/local/tools/hadoop-2.8.0/tmp</value>
+    </property>
+3.修改hdfs-site.xml
+    <!-- dfs.replication -它决定着系统里面的文件块的数据备份个数。对于一个实际的应用，它应该被设为3（这个数字并没有上限，但更多的备份可能并没有作用，而且会占用更多的空间）。少于三个的备份，可能会影响到数据的可靠性(系统故障时，也许会造成数据丢失)-->
+    <property>
+        <name>dfs.replication</name>
+        <value>1</value>
+     </property>
+     <!-- dfs.data.dir -这是DataNode结点被指定要存储数据的本地文件系统路径。DataNode结点上                       
+    的这个路径没有必要完全相同，因为每台机器的环境很可能是不一样的。但如果每台机器上的这                    
+    个路径都是统一配置的话，会使工作变得简单一些。默认的情况下，它的值hadoop.tmp.dir, 这             
+    个路径只能用于测试的目的，因为，它很可能会丢失掉一些数据。所以，这个值最好还是被覆盖。 -->
+     <property>
+        <name>dfs.name.dir</name>
+        <value>/home/hdfs/name</value>
+     </property>
+     <!-- dfs.name.dir -这是NameNode结点存储hadoop文件系统信息的本地系统路径。这个值只对    
+    NameNode有效，DataNode并不需要使用到它。上面对于/temp类型的警告，同样也适用于这里。在
+    实际应用中，它最好被覆盖掉。-->
+    <property>
+        <name>dfs.data.dir</name>
+        <value>/home/hdfs/data</value>
+    </property>
+
+     <!—解决：org.apache.hadoop.security.AccessControlException:Permission                                            
+    denied:user=Administrator,access=WRITE,inode="tmp":root:supergroup:rwxr-xr-x 。
+    因为Eclipse使用hadoop插件提交作业时，会默认以 DrWho 身份去将作业写入hdfs文件系统中，对应    
+    的也就是 HDFS 上的/user/hadoop, 由于 DrWho 用户对hadoop目录并没有写入权限，所以导致异常    
+    的发生。解决方法为：放开 hadoop 目录的权限， 
+    命令如下 ：$ hadoop fs -chmod 777 /user/hadoop 
+    -->
+    <property> 
+       <name>dfs.permissions</name>
+        <value>false</value>
+        <description>
+            If "true", enable permission checking in HDFS. If "false", permission checking is turned
+            off, but all other behavior is unchanged. Switching from one parameter value to the other 
+            does not change the mode, owner or group of files or directories
+          </description>
+ 
+    </property>
+4.修改mapred-site.xml
+    <!--  指定MR运行在YARN框架上  -->
+    <property>
+        <name>mapreduce.framework.name</name>
+        <value>yarn</value>
+    </property>
+5.修改yarn-site.xml
+    <!-- 指定YARN的老大（ResourceManager）的地址 -->
+    <property>
+        <name>yarn.resourcemanager.hostname</name>
+        <value>hadoop</value>
+    </property>
+    <!-- reducer获取数据的方式 -->
+    <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+    </property>
+6.设置环境变量
+    sudo vi /etc/profile
+    export HADOOP_HOME=/usr/local/tools/hadoop-2.8.0
+    export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP/sbin
+    source /etc/profile
+
+7.初始化HDFS（格式化文件系统）
+    hdfs namenode -format
+
+8.启动
+启动HDFS：sbin/start-dfs.sh
+启动YARN：sbin/start-yarn.sh
+
+9.查看进程
+DataNode
+NodeManager
+ResourceManager
+NameNode
+SecondaryNameNode
+
+10.通过浏览器访问Hadoop Manager
+HDFS    http://hadoop:50070
+YARN    http://hadoop:8088
+
+11.测试
+HDFS
+存：hadoop fs -put ~/Desktop/test.txt hdfs://hadoop:9000/test.txt
+取：hadoop fs -get hdfs://hadoop:9000/test.txt ~/Desktop/test
+
+MR和YARN
+运行wordcount
+hadoop jar share/hadoop/mapreduce/hadoop-mapreduce-examples-2.8.0.jar wordcount /word /wc

@@ -1,0 +1,299 @@
+1.环境： centos7.2 + jdk1.7.0_67 + zookeeper3.4.5 + hadoop2.8.0
+2.虚拟机环境： 3台centos 虚拟机， 每台设置2G RAM
+3.修改主机名
+	sudo vi /etc/sysconfig/network，将HOSTNAME=后内容改成规划的机器名
+
+	此次部署主机名与IP的对应如下：
+	机名				IP		
+	hadoop1		192.168.159.161
+	hadoop2		192.168.159.162
+	hadoop3		192.168.159.163
+	注意：在云主机上，配置的是内网IP
+4.修改hosts文件
+	sudo vi /etc/hosts
+	在hosts文件中写入上面的主机名和IP的映射关系。
+	重启系统后，ping 各个主机来验证修改是否生效。
+5.关闭防火墙
+	通常hadoop系统运行在内网，可以直接关闭防火墙。如果需要将hadoop放在外网，则要将hadoop使用的端口加入到白名单。
+6.因为Hadoop的进程之间通信使用ssh方式，需要每次都要输入密码。为了实现自动化操作，需要配置ssh免密码登陆方式。
+	6.1 生成ssh key： ssh-keygen -t rsa 
+	6.2 将三台服务器的公钥发送到每台机器上，包括本机：ssh-copy-id -i ${user}@hadoop1
+	6.3 分别测试三台服务器免密登录配置是否成功: ssh ${user}@hadoop1
+7.安装JDK到三台服务器
+	7.1在VM上创建目录：sudo mkdir /usr/local/tools
+	7.2从本地复制jdk到VM：scp ~/jdk-7u67-linux-x64.tar.gz ${user}@hadoop1:/usr/local/tools
+	7.3在VM上切换到tools目录，解压jdk：tar -zxvf jdk-7u67-linux-x64.tar.gz
+	7.4修改环境变量：sudo vi /etc/profile
+		在尾部添加：
+		JAVA_HOME=/usr/local/jdk1.7.0
+        CLASSPATH=.:$JAVA_HOME/lib.tools.jar
+        PATH=$JAVA_HOME/bin:$PATH
+        export JAVA_HOME CLASSPATH PATH
+        保存退出。
+    7.5使环境变量生效：source /etc/profile
+    7.6检查环境变量是否生效：java -version
+    7.7替换原有符号连接
+    	删除原有符号连接 
+		#sudo rm  -rf  /usr/bin/java
+		#sudo rm  -rf  /usr/bin/javac
+		创建新符号连接 
+		#sudo ln -s /usr/local/jdk1.7.0/bin/java  /usr/bin/java
+		#sudo ln -s /usr/local/jdk1.7.0/bin/javac  /usr/bin/javac 
+	7.8在其他两台VM上重复上述步骤
+8.安装配置zookeeper集群
+	8.1从本地复制zookeeper到VM：scp ~/zookeeper-3.4.5.tar.gz ${user}@hadoop1:/usr/local/tools
+	8.2在VM上切换到tools目录，解压zookeeper：tar -zxvf zookeeper-3.4.5.tar.gz
+	8.3修改配置文件：
+		cd /zookeeper-3.4.5/conf
+		cp zoo_sample.cfg zoo.cfg
+		vi zoo.cfg
+		修改：dataDir=/usr/local/tools/zookeeper-3.4.5/tmp
+			在最后添加：
+			server.1=hadoop1:2888:3888
+			server.2=hadoop2:2888:3888
+			server.3=hadoop3:2888:3888
+		保存退出
+		然后创建一个tmp文件夹
+			mkdir /usr/local/tools/zookeeper-3.4.5/tmp
+		再创建一个空文件
+			touch /usr/local/tools/zookeeper-3.4.5/tmp/myid
+		最后向该文件写入ID
+			echo 1 > /usr/local/tools/zookeeper-3.4.5/tmp/myid
+	8.4将配置好的zookeeper拷贝到其他VM上
+		scp -r /usr/local/tools/zookeeper-3.4.5 ${user}@hadoop2:/usr/local/tools
+		scp -r /usr/local/tools/zookeeper-3.4.5 ${user}@hadoop3:/usr/local/tools
+		修改hadoop2、hadoop3对应的myid内容：
+		hadoop2:
+			echo 2 > /usr/local/tools/zookeeper-3.4.5/tmp/myid
+		hadoop3:
+			echo 3 > /usr/local/tools/zookeeper-3.4.5/tmp/myid
+	8.5启动zookeeper服务
+		分别在各个节点启动zookeeper
+			bin/zkServer.sh start
+	8.6验证zookeeper安装是否成功
+		查看各个节点的进程：jps
+			QuorumPeerMain
+		查看状态
+			bin/zkServer.sh status
+		应该看到一个leader和两个follower。
+9.安装配置hadoop集群
+	9.1 拷贝解压到 /usr/local/tools 目录（略）。
+	9. 添加hadoop到环境变量(三个节点都要修改)
+		sudo vi /etc/profile
+		在文件末尾添加
+		export HADOOP_HOME=/usr/local/tools/hadoop-2.8.0
+		export PATH=$PATH:$HADOOP_HOME/bin
+		保存退出，source /etc/profile 使环境变量生效。
+	9.3 集群规划
+		根据hadoop各个服务的职责，得出NameNode 和 ResourceManager对系统资源要求较高，故将二者分散到不同服务器上。
+		hadoop在2.0版本以后对NameNode进行抽象，抽象出来一个NameService概念，通过NameService对NameNode进行HA。
+		hadoop2.4版本以后对ResourceManager进行抽象，抽象出来一个cluster概念，通过cluster-id对RM进行HA。
+
+			机名				IP																运行服务
+			hadoop1		192.168.159.161				NN1(Active), DataNode, NodeManager, DFSZKFailoverController, QuorumPeerMain, JournalNode
+			hadoop2		192.168.159.162				NN2(Standby), RM1(Active), DataNode, NodeManager, DFSZKFailoverController, QuorumPeerMain, JournalNode
+			hadoop3		192.168.159.163				RM2(Standby), DataNode, NodeManager, QuorumPeerMain, JournalNode
+
+	9.4 修改hadoop配置文件，所有的配置文件都在 $HADOOP_HOME/etc/hadoop 目录下
+		9.4.1修改hadoo-env.sh
+			export JAVA_HOME=/usr/local/tools/jdk1.7.0
+		9.4.2修改core-site.xml
+			<configuration>
+				<!-- 指定hdfs的nameservice为nn-ha -->
+				<property>
+					<name>fs.defaultFS</name>
+					<value>hdfs://nn-ha</value>
+				</property>
+				<!-- 指定hadoop临时目录 -->
+				<property>
+					<name>hadoop.tmp.dir</name>
+					<value>/usr/local/tools/hadoop-2.8.0/tmp</value>
+				</property>
+				<!-- 指定zookeeper地址 -->
+				<property>
+					<name>ha.zookeeper.quorum</name>
+					<value>hadoop1:2181,hadoop2:2181,hadoop3:2181</value>
+				</property>
+			</configuration>
+		9.4.3修改hdfs-site.xml
+			<configuration>
+				<!--指定hdfs的nameservice为nn-ha，需要和core-site.xml中的保持一致 -->
+				<property>
+					<name>dfs.nameservices</name>
+					<value>nn-ha</value>
+				</property>
+				<!-- nn-ha下面有两个NameNode，分别是nn1，nn2 -->
+				<property>
+					<name>dfs.ha.namenodes.nn-ha</name>
+					<value>nn1,nn2</value>
+				</property>
+				<!-- nn1的RPC通信地址 -->
+				<property>
+					<name>dfs.namenode.rpc-address.nn-ha.nn1</name>
+					<value>hadoop1:9000</value>
+				</property>
+				<!-- nn1的http通信地址 -->
+				<property>
+					<name>dfs.namenode.http-address.nn-ha.nn1</name>
+					<value>hadoop1:50070</value>
+				</property>
+				<!-- nn2的RPC通信地址 -->
+				<property>
+					<name>dfs.namenode.rpc-address.nn-ha.nn2</name>
+					<value>hadoop2:9000</value>
+				</property>
+				<!-- nn2的http通信地址 -->
+				<property>
+					<name>dfs.namenode.http-address.nn-ha.nn2</name>
+					<value>hadoop2:50070</value>
+				</property>
+				<!-- 指定NameNode的元数据在JournalNode上的存放位置 -->
+				<property>
+					<name>dfs.namenode.shared.edits.dir</name>
+					<value>qjournal://hadoop1:8485;hadoop2:8485;hadoop3:8485/nn-ha</value>
+				</property>
+				<!-- 指定JournalNode在本地磁盘存放数据的位置 -->
+				<property>
+					<name>dfs.journalnode.edits.dir</name>
+					<value>/usr/local/tools/hadoop-2.8.0/journal</value>
+				</property>
+				<!-- 开启NameNode失败自动切换 -->
+				<property>
+					<name>dfs.ha.automatic-failover.enabled</name>
+					<value>true</value>
+				</property>
+				<!-- 配置失败自动切换实现方式 -->
+				<property>
+					<name>dfs.client.failover.proxy.provider.nn-ha</name>
+					<value>org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider</value>
+				</property>
+				<!-- 配置隔离机制方法，多个机制用换行分割，即每个机制占用一行-->
+				<property>
+					<name>dfs.ha.fencing.methods</name>
+					<value>
+						sshfence
+						shell(/bin/true)
+					</value>
+				</property>
+				<!-- 使用sshfence隔离机制时需要ssh免登陆 -->
+				<property>
+					<name>dfs.ha.fencing.ssh.private-key-files</name>
+					<value>/${user}/.ssh/id_rsa</value>
+				</property>
+				<!-- 配置sshfence隔离机制超时时间 -->
+				<property>
+					<name>dfs.ha.fencing.ssh.connect-timeout</name>
+					<value>30000</value>
+				</property>
+			</configuration>
+		9.4.4修改mapred-site.xml
+			<configuration>
+				<!-- 指定mr框架为yarn方式 -->
+				<property>
+					<name>mapreduce.framework.name</name>
+					<value>yarn</value>
+				</property>
+			</configuration>
+		9.4.5修改yarn-site.xml
+			<configuration>
+				<!-- 是否启用RM HA，默认为false -->
+				<property>  
+						<name>yarn.resourcemanager.ha.enabled</name>  
+					<value>true</value>  
+				</property> 
+				<!-- 集群的Id -->
+				<property>  
+					<name>yarn.resourcemanager.cluster-id</name>  
+					<value>yarn-ha</value>  
+				</property>  
+				<!-- yarn-ha的逻辑id列表，用逗号分隔 -->
+				<property>  
+					<name>yarn.resourcemanager.ha.rm-ids</name>  
+					<value>rm1,rm2</value>  
+				</property> 
+				<!-- yarn-ha的逻辑id rm1的地址 -->
+				<property>  
+					<name>yarn.resourcemanager.hostname.rm1</name>  
+					<value>hadoop2</value>  
+				</property>  
+				<!-- yarn-ha的逻辑id rm2的地址 -->
+				<property>  
+					<name>yarn.resourcemanager.hostname.rm2</name>  
+					<value>hadoop3</value>  
+				</property>
+				<!--RM故障自动切换-->
+				<property>
+					<name>yarn.resourcemanager.ha.automatic-failover.recover.enabled</name>
+					<value>true</value>
+				</property>
+				<!--RM故障自动恢复
+				<property>
+					<name>yarn.resourcemanager.recovery.enabled</name> 
+					<value>true</value> 
+				</property> -->
+				<!--用于持久存储的类。rmstate信息存放主要有几种，较为常用的是zkstore，另一种是FileSystemRMStateStore,还有一种是MemoryRMStateStore。-->
+				<property>
+					<name>yarn.resourcemanager.store.class</name>                     
+					<value>org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore</value>
+				</property>
+				<!-- ZooKeeper服务器的地址（主机：端口号），既用于状态存储也用于内嵌的leader-selection。 -->
+				<property>
+					<name>yarn.resourcemanager.zk-address</name>  
+					<value>hadoop1:2181,hadoop2:2181,hadoop3:2181</value>  
+				</property> 
+				<!-- 指定nodemanager启动时加载server的方式为shuffle server -->
+				<property>
+					<name>yarn.nodemanager.aux-services</name>
+					<value>mapreduce_shuffle</value>
+				</property>
+			</configuration>
+		9.4.6修改slaves(slaves是指定子节点的位置，NameNode上的slaves指定DataNode的位置，ResourceManager上的slaves指定NodeManager的位置，
+			现在只有三台服务器导致第三台上的slaves同时指定DN和NM的位置，所以三台slaves配置一样)。
+			hadoop1
+			hadoop2
+			hadoop3
+		9.4.7将配置好的hadoop拷贝到其他节点(略)
+		9.4.8启动集群
+			启动集群需要按照以下步骤进行：
+			9.4.8.1 启动zookeeper集群，查看状态：两个follower  一个leader
+			9.4.8.2 启动journalnode
+					在hadoop1上启动所有journalnode
+					
+					sbin/hadoop-daemons.sh start journalnode
+					
+					注意：是调用的hadoop-daemons.sh，是复数s的那个脚本
+					运行jps命令检验，hadoop1、hadoop2、hadoop3上多了JournalNode进程
+			9.4.8.3 格式化HDFS
+					在hadoop1上执行 hdfs namenode -format
+					格式化后会在根据core-site.xml中的hadoop.tmp.dir配置生成个文件夹，将这个文件夹拷贝到hadoop3下hadoop对应的目录。
+					scp -r tmp/ hadoop2:/usr/local/tools/hadoop-2.8.0/
+			9.4.8.4 格式化zookeeper(在hadoop1上执行即可)
+					hdfs zkfc -formatZK
+			9.4.8.5 启动HDFS(在hadoop1上执行)
+					sbin/start-dfs.sh
+			9.4.8.6 启动YARN(在hadoop2上执行)
+					sbin/start-yarn.sh
+					会启动hadoop2上的ResourceManger和所有slaves节点上的NodeManager
+					接下来需要单独在hadoop3上启动ResourceManager
+					sbin/yarn-daemon.sh start resourcemanager
+
+		9.4.9验证HA
+			9.4.9.1.通过浏览器访问 http://hadoop1:50070 可以看到NameNode的状态是 Active，通过浏览器访问 http://hadoop2:50070，状态为Standby
+			9.4.9.2.向HDFS上传一个文件。
+			9.4.9.3.在hadoop1上使用kill命令，杀掉NameNode进程。
+			9.4.9.4.通过浏览器访问 http://hadoop2:50070 ，可以看到hadoop2上的NameNode切换为Active状态，通过hadoop命令查看文件之类的操作也都成功。
+			9.4.9.5.在hadoop1上启动NameNode进程，在浏览器查看hadoop1的状态为standby。
+			9.4.9.6.执行wordcount例子验证RM。
+			RM的HA与HDFS类似，可以通过 http://host:8088 分别查看kill执行前和执行后 RM的状态切换。
+
+		9.4.10再次启动hadoop
+			hadoop在第一次启动时候比较复杂，再启动的步骤相对简单。
+			9.4.10.1启动 zookeeper。
+			9.4.10.2在hadoop1启动hdfs：sbin/start-dfs.sh
+			9.4.10.3在hadoop2启动yarn：sbin/start-yarn.sh
+			9.4.10.4在hadoop3启动ResourceManager：sbin/yarn-daemon.sh start resourcemanager
+
+
+
+
+
