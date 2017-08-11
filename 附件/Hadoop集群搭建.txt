@@ -265,7 +265,7 @@
 					运行jps命令检验，hadoop1、hadoop2、hadoop3上多了JournalNode进程
 			9.4.8.3 格式化HDFS
 					在hadoop1上执行 hdfs namenode -format
-					格式化后会在根据core-site.xml中的hadoop.tmp.dir配置生成个文件夹，将这个文件夹拷贝到hadoop3下hadoop对应的目录。
+					格式化后会在根据core-site.xml中的hadoop.tmp.dir配置生成个文件夹，将这个文件夹拷贝到hadoop2下hadoop对应的目录。
 					scp -r tmp/ hadoop2:/usr/local/tools/hadoop-2.8.0/
 			9.4.8.4 格式化zookeeper(在hadoop1上执行即可)
 					hdfs zkfc -formatZK
