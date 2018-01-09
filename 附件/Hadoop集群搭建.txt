@@ -1,4 +1,19 @@
 1.环境： centos7.2 + jdk1.7.0_67 + zookeeper3.4.5 + hadoop2.8.0
+	1.1关闭防火墙
+		systemctl stop firewalld.service #停止firewall
+		systemctl disable firewalld.service #禁止firewall开机启动
+		firewall-cmd --state #查看默认防火墙状态（关闭后显示notrunning，开启后显示running）
+	1.2禁用SeLinux
+		查看状态：getenforce 或 /usr/sbin/sestatus -v
+		修改：vi /etc/selinux/config	将SELINUX=enforcing改为SELINUX=disabled 
+		重启生效
+	1.3关闭ipv6
+		修改grub: vi /etc/default/grub
+			第六行 在等号后添加 ipv6.disable=1 保存退出
+		重新加载并重启：sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+				reboot
+		验证：ifconfig 看不到inet6
+		
 2.虚拟机环境： 3台centos 虚拟机， 每台设置2G RAM
 3.修改主机名
 	sudo vi /etc/sysconfig/network，将HOSTNAME=后内容改成规划的机器名
@@ -95,8 +110,10 @@
 			hadoop3		192.168.159.163				RM2(Standby), DataNode, NodeManager, QuorumPeerMain, JournalNode
 
 	9.4 修改hadoop配置文件，所有的配置文件都在 $HADOOP_HOME/etc/hadoop 目录下
+		创建运行时目录：mkdir /usr/local/tools/hadoop/tmp
 		9.4.1修改hadoo-env.sh
 			export JAVA_HOME=/usr/local/tools/jdk1.7.0
+			export HADOOP_PID_DIR=/usr/local/tools/hadoop/tmp
 		9.4.2修改core-site.xml
 			<configuration>
 				<!-- 指定hdfs的nameservice为nn-ha -->
@@ -194,11 +211,13 @@
 					<value>yarn</value>
 				</property>
 			</configuration>
+			修改mapred-env.sh
+			export HADOOP_MAPRED_PID_DIR=/usr/local/tools/hadoop/tmp
 		9.4.5修改yarn-site.xml
 			<configuration>
 				<!-- 是否启用RM HA，默认为false -->
 				<property>  
-						<name>yarn.resourcemanager.ha.enabled</name>  
+					<name>yarn.resourcemanager.ha.enabled</name>  
 					<value>true</value>  
 				</property> 
 				<!-- 集群的Id -->
@@ -247,6 +266,9 @@
 					<value>mapreduce_shuffle</value>
 				</property>
 			</configuration>
+	
+			修改yarn-env.sh
+			export YARN_PID_DIR=/usr/local/tools/hadoop/tmp
 		9.4.6修改slaves(slaves是指定子节点的位置，NameNode上的slaves指定DataNode的位置，ResourceManager上的slaves指定NodeManager的位置，
 			现在只有三台服务器导致第三台上的slaves同时指定DN和NM的位置，所以三台slaves配置一样)。
 			hadoop1
@@ -295,5 +317,10 @@
 
 
 
+==================================
+
+
+3.设置线程数和文件打开数
+4.集群时间同步
 
 
